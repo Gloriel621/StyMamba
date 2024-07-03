@@ -30,7 +30,7 @@ class DropPath(nn.Module):
         return drop_path(x, self.drop_prob, self.training)
 
 from itertools import repeat
-from torch._six import container_abcs
+import collections.abc as container_abcs
 
 
 # From PyTorch internals
@@ -91,7 +91,6 @@ def _no_grad_trunc_normal_(tensor, mean, std, a, b):
 
 
 def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
-    # type: (Tensor, float, float, float, float) -> Tensor
     r"""Fills the input Tensor with values drawn from a truncated
     normal distribution. The values are effectively drawn from the
     normal distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`

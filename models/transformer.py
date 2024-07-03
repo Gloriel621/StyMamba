@@ -1,14 +1,14 @@
 import copy
-from typing import Optional, List
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
-from function import normal,normal_style
 import numpy as np
 import os
 device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
 os.environ["CUDA_VISIBLE_DEVICES"] = "2, 3"
+
 class Transformer(nn.Module):
 
     def __init__(self, d_model=512, nhead=8, num_encoder_layers=3,

@@ -1,15 +1,10 @@
 import torch
 import torch.nn.functional as F
 from torch import nn
-import numpy as np
-from util import box_ops
-from util.misc import (NestedTensor, nested_tensor_from_tensor_list,
-                       accuracy, get_world_size, interpolate,
-                       is_dist_avail_and_initialized)
-from function import normal,normal_style
+from util.misc import NestedTensor, nested_tensor_from_tensor_list
+from function import normal
 from function import calc_mean_std
-import scipy.stats as stats
-from models.ViT_helper import DropPath, to_2tuple, trunc_normal_
+from models.ViT_helper import to_2tuple
 
 class PatchEmbed(nn.Module):
     """ Image to Patch Embedding
@@ -134,6 +129,7 @@ class MLP(nn.Module):
         for i, layer in enumerate(self.layers):
             x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
         return x
+    
 class StyTrans(nn.Module):
     """ This is the style transform transformer module """
     
@@ -152,8 +148,7 @@ class StyTrans(nn.Module):
                 param.requires_grad = False
 
         self.mse_loss = nn.MSELoss()
-        self.transformer = transformer
-        hidden_dim = transformer.d_model       
+        self.transformer = transformer    
         self.decode = decoder
         self.embedding = PatchEmbed
 
@@ -202,7 +197,7 @@ class StyTrans(nn.Module):
         pos_c = None
 
         mask = None
-        hs = self.transformer(style, mask , content, pos_c, pos_s)   
+        hs = self.transformer(style, mask, content, pos_c, pos_s)   
         Ics = self.decode(hs)
 
         Ics_feats = self.encode_with_intermediate(Ics)
@@ -213,8 +208,8 @@ class StyTrans(nn.Module):
             loss_s += self.calc_style_loss(Ics_feats[i], style_feats[i])
             
         
-        Icc = self.decode(self.transformer(content, mask , content, pos_c, pos_c))
-        Iss = self.decode(self.transformer(style, mask , style, pos_s, pos_s))    
+        Icc = self.decode(self.transformer(content, mask, content, pos_c, pos_c))
+        Iss = self.decode(self.transformer(style, mask, style, pos_s, pos_s))    
 
         #Identity losses lambda 1    
         loss_lambda1 = self.calc_content_loss(Icc,content_input)+self.calc_content_loss(Iss,style_input)
@@ -223,8 +218,8 @@ class StyTrans(nn.Module):
         Icc_feats=self.encode_with_intermediate(Icc)
         Iss_feats=self.encode_with_intermediate(Iss)
         loss_lambda2 = self.calc_content_loss(Icc_feats[0], content_feats[0])+self.calc_content_loss(Iss_feats[0], style_feats[0])
+
         for i in range(1, 5):
             loss_lambda2 += self.calc_content_loss(Icc_feats[i], content_feats[i])+self.calc_content_loss(Iss_feats[i], style_feats[i])
-        # Please select and comment out one of the following two sentences
-        return Ics,  loss_c, loss_s, loss_lambda1, loss_lambda2   #train
-        # return Ics    #test 
+
+        return Ics, loss_c, loss_s, loss_lambda1, loss_lambda2

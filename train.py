@@ -10,7 +10,11 @@ from torchvision import transforms
 from tqdm import tqdm
 from pathlib import Path
 import models.transformer as transformer
-import models.StyTR  as StyTR 
+import models.StyTR as StyTR
+
+import models.mambanet as mambanet
+import models.stymamba as StyMamba
+
 from sampler import InfiniteSamplerWrapper
 from torchvision.utils import save_image
 
@@ -64,9 +68,9 @@ def warmup_learning_rate(optimizer, iteration_count):
 
 parser = argparse.ArgumentParser()
 # Basic options
-parser.add_argument('--content_dir', default='./datasets/train2014', type=str,   
+parser.add_argument('--content_dir', default='/media/NAS/DATASET/COCO/train2014', type=str,   
                     help='Directory path to a batch of content images')
-parser.add_argument('--style_dir', default='./datasets/Images', type=str,  #wikiart dataset crawled from https://www.wikiart.org/
+parser.add_argument('--style_dir', default='../monet_jpg', type=str,  #wikiart dataset crawled from https://www.wikiart.org/
                     help='Directory path to a batch of style images')
 parser.add_argument('--vgg', type=str, default='./experiments/vgg_normalised.pth')  #run the train.py, please download the pretrained vgg checkpoint
 
@@ -78,7 +82,7 @@ parser.add_argument('--log_dir', default='./logs',
 parser.add_argument('--lr', type=float, default=5e-4)
 parser.add_argument('--lr_decay', type=float, default=1e-5)
 parser.add_argument('--max_iter', type=int, default=160000)
-parser.add_argument('--batch_size', type=int, default=8)
+parser.add_argument('--batch_size', type=int, default=2)
 parser.add_argument('--style_weight', type=float, default=10.0)
 parser.add_argument('--content_weight', type=float, default=7.0)
 parser.add_argument('--n_threads', type=int, default=16)
@@ -99,20 +103,21 @@ if not os.path.exists(args.log_dir):
     os.mkdir(args.log_dir)
 writer = SummaryWriter(log_dir=args.log_dir)
 
-vgg = StyTR.vgg
+vgg = StyMamba.vgg
 vgg.load_state_dict(torch.load(args.vgg))
 vgg = nn.Sequential(*list(vgg.children())[:44])
 
-decoder = StyTR.decoder
-embedding = StyTR.PatchEmbed()
+decoder = StyMamba.decoder
+embedding = StyMamba.PatchEmbed()
 
-Trans = transformer.Transformer()
+# Trans = transformer.Transformer()
+mamba = mambanet.MambaNet()
 with torch.no_grad():
-    network = StyTR.StyTrans(vgg,decoder,embedding, Trans,args)
+    network = StyMamba.StyTrans(vgg, decoder, embedding, mamba, args)
 network.train()
-
+ 
 network.to(device)
-network = nn.DataParallel(network, device_ids=[0,1])
+network = nn.DataParallel(network, device_ids=[0])
 content_tf = train_transform()
 style_tf = train_transform()
 
@@ -132,7 +137,7 @@ style_iter = iter(data.DataLoader(
  
 
 optimizer = torch.optim.Adam([ 
-                              {'params': network.module.transformer.parameters()},
+                              {'params': network.module.mambanet.parameters()},
                               {'params': network.module.decode.parameters()},
                               {'params': network.module.embedding.parameters()},        
                               ], lr=args.lr)
@@ -155,7 +160,7 @@ for i in tqdm(range(args.max_iter)):
     style_images = next(style_iter).to(device)  
     out, loss_c, loss_s,l_identity1, l_identity2 = network(content_images, style_images)
 
-    if i % 100 == 0:
+    if i % 10 == 0:
         output_name = '{:s}/test/{:s}{:s}'.format(
                         args.save_dir, str(i),".jpg"
                     )
@@ -167,20 +172,20 @@ for i in tqdm(range(args.max_iter)):
     loss_c = args.content_weight * loss_c
     loss_s = args.style_weight * loss_s
     loss = loss_c + loss_s + (l_identity1 * 70) + (l_identity2 * 1) 
-  
-    print(loss.sum().cpu().detach().numpy(),"-content:",loss_c.sum().cpu().detach().numpy(),"-style:",loss_s.sum().cpu().detach().numpy()
-              ,"-l1:",l_identity1.sum().cpu().detach().numpy(),"-l2:",l_identity2.sum().cpu().detach().numpy()
-              )
+    
+    if i % 10 == 0:
+        tqdm.write(f'Total_loss: {loss.sum().item():.4f}, Content_loss: {loss_c.sum().item():.4f}, Style_loss: {loss_s.sum().item():.4f}, Identity_L1: {l_identity1.sum().item():.4f}, Identity_L2: {l_identity2.sum().item():.4f}')
+
        
     optimizer.zero_grad()
     loss.sum().backward()
     optimizer.step()
 
-    writer.add_scalar('loss_content', loss_c.sum().item(), i + 1)
-    writer.add_scalar('loss_style', loss_s.sum().item(), i + 1)
-    writer.add_scalar('loss_identity1', l_identity1.sum().item(), i + 1)
-    writer.add_scalar('loss_identity2', l_identity2.sum().item(), i + 1)
-    writer.add_scalar('total_loss', loss.sum().item(), i + 1)
+    # writer.add_scalar('loss_content', loss_c.sum().item(), i + 1)
+    # writer.add_scalar('loss_style', loss_s.sum().item(), i + 1)
+    # writer.add_scalar('loss_identity1', l_identity1.sum().item(), i + 1)
+    # writer.add_scalar('loss_identity2', l_identity2.sum().item(), i + 1)
+    # writer.add_scalar('total_loss', loss.sum().item(), i + 1)
 
     if (i + 1) % args.save_model_interval == 0 or (i + 1) == args.max_iter:
         state_dict = network.module.transformer.state_dict()
