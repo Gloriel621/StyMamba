@@ -4,6 +4,13 @@
 This paper is proposed to achieve unbiased image style transfer based on the transformer model. We can promote the stylization effect compared with state-of-the-art methods.
 This repository is the official implementation of [SyTr^2 : Image Style Transfer with Transformers](https://arxiv.org/abs/2105.14576).
 
+## 변경점
+
+기존 models/StyTR.py, models/transformer.py 대신 models/mambanet.py, models/stymamba.py 의 아키텍처 사용.
+
+VMamba 코드는 변경 없이 모델 구조만 가져와서 썼고, train.py 에서 argument로 들어가는 것들 있으니 바꿔서 사용할 수 있음
+
+
 ## Results presentation 
 <p align="center">
 <img src="https://github.com/diyiiyiii/StyTR-2/blob/main/Figure/Unbiased.png" width="90%" height="90%">
