@@ -42,7 +42,7 @@ class Transformer(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, style, mask , content, pos_embed_c, pos_embed_s):
+    def forward(self, style, mask, content, pos_embed_c, pos_embed_s):
 
         # content-aware positional embedding
         content_pool = self.averagepooling(content)       

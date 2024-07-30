@@ -133,7 +133,7 @@ class MLP(nn.Module):
 class StyTrans(nn.Module):
     """ This is the style transform transformer module """
     
-    def __init__(self,encoder,decoder,PatchEmbed, transformer,args):
+    def __init__(self,encoder,decoder, PatchEmbed, transformer, args):
 
         super().__init__()
         enc_layers = list(encoder.children())
@@ -171,6 +171,7 @@ class StyTrans(nn.Module):
         target_mean, target_std = calc_mean_std(target)
         return self.mse_loss(input_mean, target_mean) + \
                self.mse_loss(input_std, target_std)
+    
     def forward(self, samples_c: NestedTensor,samples_s: NestedTensor):
         """ The forward expects a NestedTensor, which consists of:
                - samples.tensor: batched images, of shape [batch_size x 3 x H x W]
