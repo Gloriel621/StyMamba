@@ -41,3 +41,7 @@ test.sh
 classification/models/vmamba copy.py
 kernels/selective_scan/ssmjax.py
 classification/models/vheat_wzz.py
+wikiart/
+experiments/
+VMamba2/
+WikiArt Dataset/

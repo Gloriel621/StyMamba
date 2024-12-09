@@ -5,6 +5,9 @@ from util.misc import NestedTensor, nested_tensor_from_tensor_list
 from function import normal
 from function import calc_mean_std
 from models.ViT_helper import to_2tuple
+import clip  # Make sure CLIP is installed
+from torchvision.transforms import Normalize
+from .mambanet2 import MambaNet
 
 class PatchEmbed(nn.Module):
     """ Image to Patch Embedding with optional patch shuffling
@@ -143,7 +146,7 @@ class MLP(nn.Module):
 class StyTrans(nn.Module):
     """ This is the style transform transformer module """
     
-    def __init__(self, encoder, decoder, PatchEmbed: PatchEmbed, mambanet, args):
+    def __init__(self, encoder, decoder, PatchEmbed: PatchEmbed, mambanet: MambaNet, args, name_info, device):
         super().__init__()
         enc_layers = list(encoder.children())
         self.enc_1 = nn.Sequential(*enc_layers[:4])  # input -> relu1_1
@@ -158,9 +161,20 @@ class StyTrans(nn.Module):
 
         self.mse_loss = nn.MSELoss()
         self.mambanet = mambanet
-        hidden_dim = mambanet.d_model       
+     
         self.decode = decoder
         self.embedding = PatchEmbed
+        self.name_info = name_info
+
+        # Initialize CLIP model
+        self.clip_model, _ = clip.load("ViT-B/32", device=device, jit=False)
+        self.clip_model.eval()
+        for param in self.clip_model.parameters():
+            param.requires_grad = False
+
+        # CLIP normalization parameters
+        self.clip_normalize = Normalize(mean=[0.48145466, 0.4578275, 0.40821073],
+                                        std=[0.26862954, 0.26130258, 0.27577711])
 
     def encode_with_intermediate(self, input):
         results = [input]
@@ -182,9 +196,11 @@ class StyTrans(nn.Module):
         return self.mse_loss(input_mean, target_mean) + \
                self.mse_loss(input_std, target_std)
 
-    def forward(self, samples_c: NestedTensor, samples_s: NestedTensor):
+    def forward(self, samples_c: NestedTensor, samples_s: NestedTensor, style_labels, style_type="image"):
+        
         content_input = samples_c
         style_input = samples_s
+        
         if isinstance(samples_c, (list, torch.Tensor)):
             samples_c = nested_tensor_from_tensor_list(samples_c)
         if isinstance(samples_s, (list, torch.Tensor)):
@@ -196,23 +212,76 @@ class StyTrans(nn.Module):
         style = self.embedding(samples_s.tensors, shuffle_patches=True)
         content = self.embedding(samples_c.tensors)
 
+        # retrive text labels according to style_labels
+        style_labels_list = style_labels.tolist()  
+        text_styles = [self.name_info[label] for label in style_labels_list]
+        # text_styles = ["Van Gogh", "Da Vinci", "Picasso" ... ] etc
+ 
         pos_s = None
         pos_c = None
-
         mask = None
-        hs = self.mambanet(style, mask, content, pos_c, pos_s)
+
+        if style_type == "image":
+            # style is image imbedding
+            hs = self.mambanet.forward_image_style(style, mask, content, pos_c, pos_s)
+
+        else:
+            # style is text 
+            hs = self.mambanet.forward_text_style(text_styles, mask, content, pos_c)
+
         Ics = self.decode(hs)
+
+        # ----- CLIP Loss Computation -----
+        #normalization for encoding
+        Ics_clamped = Ics.clamp(0, 1)
+        Ics_normalized = self.clip_normalize(Ics_clamped)
+        Ics_resized = F.interpolate(Ics_normalized, size=(224, 224), mode='bilinear', align_corners=False)
+
+        # Encode image using CLIP
+        with torch.no_grad():
+            image_features = self.clip_model.encode_image(Ics_resized)
+            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+
+        # Retrieve the corresponding text for each style label
+        style_labels_list = style_labels.tolist()  
+        texts = [self.name_info[label] for label in style_labels_list]
+        text_tokens = clip.tokenize(texts).to(Ics.device)  
+        with torch.no_grad():
+            text_features = self.clip_model.encode_text(text_tokens)
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+
+        # Compute cosine similarity
+        cosine_sim = torch.sum(image_features * text_features, dim=-1) 
+        clip_loss = 1 - cosine_sim.mean()
+ 
+        # ----- Contrastive Loss Computation -----
+        # Encode style images using CLIP image encoder
+        with torch.no_grad():
+            style_images = samples_s.tensors.clamp(0, 1)
+            style_images_normalized = self.clip_normalize(style_images)
+            style_images_resized = F.interpolate(style_images_normalized, size=(224, 224), mode='bilinear', align_corners=False)
+            clip_encoded_s = self.clip_model.encode_image(style_images_resized)
+            clip_encoded_s = clip_encoded_s / clip_encoded_s.norm(dim=-1, keepdim=True)
+
+        similarity_matrix = clip_encoded_s @ image_features.T  # Shape: (batch_size, batch_size)
+        batch_size = similarity_matrix.size(0)
+        labels = torch.arange(batch_size).to(Ics.device)
+
+        # Compute cross-entropy loss for image-to-style and style-to-image
+        contrastive_loss_i2s = F.cross_entropy(similarity_matrix, labels)
+        contrastive_loss_s2i = F.cross_entropy(similarity_matrix.T, labels)
+        contrastive_loss = (contrastive_loss_i2s + contrastive_loss_s2i) / 2
 
         Ics_feats = self.encode_with_intermediate(Ics)
         loss_c = self.calc_content_loss(normal(Ics_feats[-1]), normal(content_feats[-1])) + \
-                 self.calc_content_loss(normal(Ics_feats[-2]), normal(content_feats[-2]))
+                self.calc_content_loss(normal(Ics_feats[-2]), normal(content_feats[-2]))
 
         loss_s = self.calc_style_loss(Ics_feats[0], style_feats[0])
         for i in range(1, 5):
             loss_s += self.calc_style_loss(Ics_feats[i], style_feats[i])
 
-        Icc = self.decode(self.mambanet(content, mask, content, pos_c, pos_c))
-        Iss = self.decode(self.mambanet(style, mask, style, pos_s, pos_s))
+        Icc = self.decode(self.mambanet.forward_image_style(content, mask, content, pos_c, pos_c))
+        Iss = self.decode(self.mambanet.forward_image_style(style, mask, style, pos_s, pos_s))
 
         loss_lambda1 = self.calc_content_loss(Icc, content_input) + self.calc_content_loss(Iss, style_input)
 
@@ -223,4 +292,5 @@ class StyTrans(nn.Module):
         for i in range(1, 5):
             loss_lambda2 += self.calc_content_loss(Icc_feats[i], content_feats[i]) + self.calc_content_loss(Iss_feats[i], style_feats[i])
 
-        return Ics, loss_c, loss_s, loss_lambda1, loss_lambda2
+        return Ics, loss_c, loss_s, loss_lambda1, loss_lambda2, clip_loss, contrastive_loss
+    

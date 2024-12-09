@@ -64,7 +64,7 @@ def warmup_learning_rate(optimizer, iteration_count, args):
 def main():
     parser = argparse.ArgumentParser()
     # Basic options
-    parser.add_argument('--content_dir', default='/media/NAS/DATASET/COCO/train2014', type=str,   
+    parser.add_argument('--content_dir', default='/hdd/dataset/coco_abb/train', type=str,   
                         help='Directory path to a batch of content images')
     # wikiart dataset crawled from https://www.wikiart.org/
     parser.add_argument('--style_dir', default='../monet_jpg', type=str,  

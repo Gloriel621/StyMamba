@@ -1,15 +1,19 @@
+import os
+import sys
 import copy
 from typing import Optional
+from transformers import AutoTokenizer
 from VMamba2.classification.models.vmamba import VSSBlock, VSSBlockOneWay
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from mamba_ssm_.models.mixer_seq_simple import MambaLMHeadModel
 
 import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
 import numpy as np
-from copy import deepcopy
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-# os.environ["CUDA_VISIBLE_DEVICES"] = "2, 3"
 
 class MambaNet(nn.Module):
 
@@ -24,6 +28,23 @@ class MambaNet(nn.Module):
         encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
         self.encoder_c = MambaEncoder(encoder_layer_c, num_encoder_layers, encoder_norm)
         self.encoder_s = MambaEncoder(encoder_layer_s, num_encoder_layers, encoder_norm)
+
+        self.tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
+
+        self.encoder_t = MambaLMHeadModel.from_pretrained(
+            "state-spaces/mamba-130m",
+            device=device,
+            dtype=torch.float32
+        )
+
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+
+        self.style_projection = nn.Sequential(
+            nn.Linear(768, 512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+        )
 
         decoder_layer = VSSDecoderLayer(hidden_dim=d_model, dropout=dropout)
         decoder_norm = nn.LayerNorm(d_model)
@@ -50,9 +71,11 @@ class MambaNet(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, style, mask, content, pos_embed_c, pos_embed_s):
-
-        # content-aware positional embedding
+    def forward_image_style(self, style, mask, content, pos_embed_c, pos_embed_s):
+        """
+        Forward pass when the style input is an image.
+        """
+        # Content-aware positional embedding
         content_pool = self.averagepooling(content)
         pos_c = self.new_ps(content_pool)
         pos_embed_c = F.interpolate(pos_c, mode='bilinear', size=style.shape[-2:])
@@ -66,12 +89,53 @@ class MambaNet(nn.Module):
         if pos_embed_c is not None:
             pos_embed_c = pos_embed_c.flatten(2).permute(2, 0, 1).unsqueeze(2)
 
+        # Encode style and content
         style = self.encoder_s(style, src_key_padding_mask=mask, pos=pos_embed_s)
         content = self.encoder_c(content, src_key_padding_mask=mask, pos=pos_embed_c)
+
         hs = self.decoder(content, style, pos_embed_s, pos_embed_c)[0]
 
         # Ensure hs is 3D before unpacking
-        hs = hs.squeeze(2)  # Add .squeeze(2) to remove the added dimension
+        hs = hs.squeeze(2)
+
+        # HWxNxC to NxCxHxW
+        N, B, C = hs.shape
+        H = int(np.sqrt(N))
+        hs = hs.permute(1, 2, 0)
+        hs = hs.view(B, C, -1, H)
+
+        return hs
+
+    def forward_text_style(self, text_input, mask, content, pos_embed_c):
+        """
+        Forward pass when the style input is text.
+        """
+        tokens = self.tokenizer(text_input, return_tensors="pt", padding=True, truncation=True)
+        input_ids = tokens.input_ids.to(next(self.encoder_t.parameters()).device)  # Move to model's device
+        # attention_mask = tokens.attention_mask.to(next(self.encoder_t.parameters()).device)
+
+        # Content-aware positional embedding
+        content_pool = self.averagepooling(content)
+        pos_c = self.new_ps(content_pool)
+        pos_embed_c = F.interpolate(pos_c, mode='bilinear', size=(content.size(-2), content.size(-1)))
+
+        # Flatten NxCxHxW to HWxNxC and ensure 4D tensors
+        content = content.flatten(2).permute(2, 0, 1).unsqueeze(2)
+        if pos_embed_c is not None:
+            pos_embed_c = pos_embed_c.flatten(2).permute(2, 0, 1).unsqueeze(2)
+
+        style = self.encoder_t.encode_text(input_ids=input_ids)
+
+        style = self.style_projection(style)
+        style = style.unsqueeze(1)
+        style = style.repeat(512, 1, 1, 1)
+
+        content = self.encoder_c(content, src_key_padding_mask=mask, pos=pos_embed_c)
+
+        hs = self.decoder(content, style, None, pos_embed_c)[0]
+
+        # Ensure hs is 3D before unpacking
+        hs = hs.mean(dim=2) 
 
         # HWxNxC to NxCxHxW
         N, B, C = hs.shape
@@ -104,7 +168,6 @@ class VSSDecoderLayer(nn.Module):
         self.vss_block_content = VSSBlock(hidden_dim=hidden_dim, drop_path=dropout, ssm_d_state=64, ssm_act_layer=nn.GELU, ssm_init="v2", forward_type="m0_noz")
         # for style, use one way scan.
         self.vss_block_style = self.vss_block = VSSBlock(hidden_dim=hidden_dim, drop_path=dropout, ssm_d_state=64, ssm_act_layer=nn.GELU, ssm_init="v2", forward_type="m0_noz")
-        self.combine_linear = nn.Linear(hidden_dim * 2, hidden_dim)
         
         # FFN
         self.linear1 = nn.Linear(hidden_dim, 2048)
