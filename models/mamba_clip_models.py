@@ -7,7 +7,7 @@ import numpy as np
 import timm
 import torch
 import os
-import sys
+import sys, pathlib
 from torch import nn
 from argparse import Namespace
 
@@ -189,13 +189,13 @@ class CLIP(nn.Module):
             "logit_scale": self.logit_scale.exp(),
         }
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append('/home/gloriel621/stymamba/VMamba2/classification')
-
 def CLIP_VMamba_S(**kwargs):
 
+    repo_root = pathlib.Path(__file__).resolve().parent.parent
+    sys.path.append(str(repo_root))
+
     from VMamba2.classification.models import build_model
-    from config import get_config
+    from VMamba2.classification.config import get_config
 
     args = Namespace(**kwargs)
     cfg = get_config(args)
