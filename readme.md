@@ -41,7 +41,7 @@ pip install causal-conv1d==1.5.0.post8 \
            openai-clip
 
 # 6. Clone the repository
-git clone https://github.com/Gloriel621/StyMamba
+git clone /address/of/this/repo
 cd StyMamba
 
 # 7. Build VMamba custom kernels
