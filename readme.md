@@ -1,7 +1,13 @@
 # StyMamba
 
 StyMamba is a Mamba‑based multimodal style‑transfer framework that supports both image‑guided and text‑guided stylization.
-⚠️ **Warning:** The software stack is extremely sensitive to exact package versions; even with the instructions below the build may still fail on some machines. Mamba‑SSM, Triton, and PyTorch all need to agree on the same CUDA toolkit and GCC version, and small mismatches can break compilation or cause runtime seg‑faults. Proceed with patience, and be ready to experiment.
+
+
+**Warning:** The software stack is extremely sensitive to exact package versions. 
+
+Even with the instructions below the build may still fail on some machines. 
+
+Mamba‑SSM, Triton, and PyTorch all need to agree on the same CUDA toolkit and GCC version, and small mismatches can break compilation or cause runtime seg‑faults.
 
 ## Tested configuration
 
