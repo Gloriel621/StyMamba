@@ -79,6 +79,16 @@ All versions should match those in the table above.
 
 4. **Using other style sets** — The WikiArt folder includes text‑prompt annotations (artist names) required for text‑guided training. If you substitute a different style dataset you must generate equivalent text files and update the preprocessing scripts.
 
+## Inference
+
+We provide two inference files, inference_image.py and inference_text.py
+
+We also provide test images for style and content in /examples.
+
+## Checkpoints
+
+Our model checkpoint is provided at:
+[https://drive.google.com/file/d/1DUANFPGwNT2dh9RyL_RfxLJ8C_XANrYk/view?usp=sharing](https://drive.google.com/file/d/1DUANFPGwNT2dh9RyL_RfxLJ8C_XANrYk/view?usp=sharing)
 
 ## Acknowledgements
 
