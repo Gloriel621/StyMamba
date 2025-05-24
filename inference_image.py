@@ -44,8 +44,8 @@ def print_param_counts(m: torch.nn.Module, name: str):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--content_dir', required=True)
-    ap.add_argument('--style_dir',   required=True)
+    ap.add_argument('--content_dir', default='./examples/images_content')
+    ap.add_argument('--style_dir',   default='./examples/images_style')
     ap.add_argument('--ckpt',        required=True)
     ap.add_argument('--vgg',         default='./experiments/vgg_normalised.pth')
     ap.add_argument('--out_dir',     default='./results')
