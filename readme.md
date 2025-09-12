@@ -51,6 +51,7 @@ git clone /address/of/this/repo
 cd StyMamba
 
 # 7. Build VMamba custom kernels
+# errors can happen when installing selective_scan.
 cd VMamba2
 pip install -r requirements.txt
 cd kernels/selective_scan
