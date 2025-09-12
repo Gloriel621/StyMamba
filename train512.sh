@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0 python3 train.py --batch_size 1 --image_size 512 --hidden_dim 256 --save_dir ./experiments_512

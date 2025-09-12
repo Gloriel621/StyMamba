@@ -34,7 +34,7 @@ class MambaNet(nn.Module):
         self.dropout2 = nn.Dropout(dropout)
         self.dropout3 = nn.Dropout(dropout)
 
-        self.new_ps = nn.Conv2d(512, 512, (1, 1))
+        self.new_ps = nn.Conv2d(d_model, d_model, (1, 1))
         self.averagepooling = nn.AdaptiveAvgPool2d(18)
 
     def _reset_parameters(self):

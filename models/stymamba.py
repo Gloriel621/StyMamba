@@ -15,36 +15,43 @@ class PatchEmbed(nn.Module):
         super().__init__()
         img_size = to_2tuple(img_size)
         patch_size = to_2tuple(patch_size)
-        num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
+        
+        self.grid_size = (img_size[0] // patch_size[0], img_size[1] // patch_size[1])
+        self.num_patches = self.grid_size[0] * self.grid_size[1]
+        
         self.img_size = img_size
         self.patch_size = patch_size
-        self.num_patches = num_patches
 
-        # Image projection layers
         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
         self.up1 = nn.Upsample(scale_factor=2, mode='nearest')
-        self.upsample = nn.Upsample(scale_factor=32, mode='bilinear', align_corners=True)
-        self.conv = nn.Conv2d(512, 512, kernel_size=3, padding=1)
+        
+        self.upsample = nn.Upsample(size=self.grid_size, mode='bilinear', align_corners=True)
+        
+        self.conv = nn.Conv2d(embed_dim, embed_dim, kernel_size=3, padding=1)
         self.relu = nn.ReLU()
+        self.clip_proj = nn.Linear(512, embed_dim)
 
     def forward_image(self, x, clip_model, shuffle_patches=False, project=True):
         """
         Forward pass for image inputs
         """
         B, C, H, W = x.shape
+        embed_dim = self.proj.out_channels
 
-        if project:  # For content input
-            x = self.proj(x)  # (B, embed_dim, H/patch_size, W/patch_size)
+        if project:
+            x = self.proj(x)
 
-        if shuffle_patches:  # Shuffle patches logic
+        if shuffle_patches:
             x = self.shuffle_patches(x)
             proj_embed = self.proj(x)
             x = F.interpolate(x, size=224, mode='bilinear', align_corners=False)  # Resize for CLIP
-            x = clip_model.encode_image(x)  # Get image features from CLIP
-            x = x.view(B, 512, 1, 1)  # Reshape for upsampling
-            x = self.upsample(x)  # Upsample to match spatial size
-            x = self.relu(self.conv(x.float()))  # Apply a convolution and ReLU
-            x = x.view(-1, 512, 32, 32) 
+            x = clip_model.encode_image(x)
+            x = self.clip_proj(x.float())
+
+            x = x.view(B, embed_dim, 1, 1)
+            x = self.upsample(x)
+            x = self.relu(self.conv(x.float()))
+            x = x.view(-1, embed_dim, self.grid_size[0], self.grid_size[1])
 
             return x + proj_embed
 
@@ -55,14 +62,14 @@ class PatchEmbed(nn.Module):
         Forward pass for text inputs
         """
         with torch.no_grad():
-            # text_features = clip_model.encode_text(text_tokens)  # Get text features from CLIP
             text_features = clip_model.encode_text_mamba(text_tokens)
-            text_features = text_features / text_features.norm(dim=-1, keepdim=True)  # Normalize
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
 
-        # Reshape and process text features
-        text_features = text_features.unsqueeze(-1).unsqueeze(-1)  # Reshape to (B, embed_dim, 1, 1)
-        x = self.upsample(text_features)  # Upsample to match the spatial size (B, embed_dim, 32, 32)
-        x = self.relu(self.conv(x.float()))  # Apply a convolution and ReLU
+        projected_features = self.clip_proj(text_features.float())
+        
+        reshaped_features = projected_features.unsqueeze(-1).unsqueeze(-1)
+        x = self.upsample(reshaped_features)
+        x = self.relu(self.conv(x.float()))
         return x
 
     def shuffle_patches(self, x):
@@ -71,11 +78,74 @@ class PatchEmbed(nn.Module):
         """
         B, C, H, W = x.shape
         x = x.view(B, C, H * W)
-        idx = torch.randperm(H * W)  # Generate a random permutation of patch indices
-        x = x[:, :, idx]  # Shuffle patches
-        x = x.view(B, C, H, W)  # Reshape back to the original dimensions
+        idx = torch.randperm(H * W)
+        x = x[:, :, idx]
+        x = x.view(B, C, H, W)
         return x
 
+decoder256 = nn.Sequential(
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(256, 256, (3, 3)),
+    nn.ReLU(),
+    nn.Upsample(scale_factor=2, mode='nearest'),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(256, 256, (3, 3)),
+    nn.ReLU(),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(256, 256, (3, 3)),
+    nn.ReLU(),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(256, 256, (3, 3)),
+    nn.ReLU(),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(256, 128, (3, 3)),
+    nn.ReLU(),
+    nn.Upsample(scale_factor=2, mode='nearest'),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(128, 128, (3, 3)),
+    nn.ReLU(),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(128, 64, (3, 3)),
+    nn.ReLU(),
+    nn.Upsample(scale_factor=2, mode='nearest'),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(64, 64, (3, 3)),
+    nn.ReLU(),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(64, 3, (3, 3)),
+)
+
+decoder512 = nn.Sequential(
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(512, 256, (3, 3)),
+    nn.ReLU(),
+    nn.Upsample(scale_factor=2, mode='nearest'),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(256, 256, (3, 3)),
+    nn.ReLU(),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(256, 256, (3, 3)),
+    nn.ReLU(),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(256, 256, (3, 3)),
+    nn.ReLU(),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(256, 128, (3, 3)),
+    nn.ReLU(),
+    nn.Upsample(scale_factor=2, mode='nearest'),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(128, 128, (3, 3)),
+    nn.ReLU(),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(128, 64, (3, 3)),
+    nn.ReLU(),
+    nn.Upsample(scale_factor=2, mode='nearest'),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(64, 64, (3, 3)),
+    nn.ReLU(),
+    nn.ReflectionPad2d((1, 1, 1, 1)),
+    nn.Conv2d(64, 3, (3, 3)),
+)
 
 decoder = nn.Sequential(
     nn.ReflectionPad2d((1, 1, 1, 1)),

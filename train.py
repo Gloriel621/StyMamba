@@ -16,9 +16,9 @@ import models.stymamba as StyMamba
 from sampler import InfiniteSamplerWrapper
 from torchvision.utils import save_image
 
-def train_transform():
+def train_transform(image_size):
     transform_list = [
-        transforms.Resize((256, 256)),
+        transforms.Resize((image_size, image_size)),
         transforms.ToTensor()
     ]
     return transforms.Compose(transform_list)
@@ -156,10 +156,13 @@ def warmup_learning_rate(optimizer, iteration_count, args):
 def main():
     parser = argparse.ArgumentParser()
     # Basic options
-    parser.add_argument('--content_dir', default='/path/to/MSCOCO', type=str,   
+    parser.add_argument('--content_dir', default='/home/gloriel621/content_train', type=str,   
                         help='Directory path to a batch of content images')
-    parser.add_argument('--style_dir', default='/path/to/wikiart', type=str,  
+    parser.add_argument('--style_dir', default='/home/gloriel621/wikiart', type=str,  
                         help='Directory path to a batch of style images')
+    parser.add_argument('--image_size', type=int, default=512, choices=[256, 512],
+                        help='The size (height and width) of the images for training.')
+    
     # download the pretrained vgg checkpoint
     parser.add_argument('--vgg', type=str, default='./experiments/vgg_normalised.pth')  
 
@@ -170,7 +173,7 @@ def main():
                         help='Directory to save the log')
     parser.add_argument('--lr', type=float, default=5e-4)
     parser.add_argument('--lr_decay', type=float, default=1e-5)
-    parser.add_argument('--max_iter', type=int, default=500000)
+    parser.add_argument('--max_iter', type=int, default=160000)
     parser.add_argument('--batch_size', type=int, default=2)
     parser.add_argument('--style_weight', type=float, default=10.0)
     parser.add_argument('--content_weight', type=float, default=7.0)
@@ -198,13 +201,19 @@ def main():
     vgg.load_state_dict(torch.load(args.vgg))
     vgg = nn.Sequential(*list(vgg.children())[:44])
 
-    decoder = StyMamba.decoder
-    embedding = StyMamba.PatchEmbed()
+    if args.hidden_dim == 256:
+        decoder = StyMamba.decoder256
+    elif args.hidden_dim == 512:
+        decoder = StyMamba.decoder512
+    else:
+        raise ValueError(f"No decoder available for hidden_dim: {args.hidden_dim}")
 
-    mamba = mambanet.MambaNet()
+    embedding = StyMamba.PatchEmbed(img_size=args.image_size, embed_dim=args.hidden_dim)
+
+    mamba = mambanet.MambaNet(d_model=args.hidden_dim)
 
     with open(os.path.join(args.style_dir,'artist_mapping.json'), 'r', encoding='utf-8') as f:
-        name = json.load(f) #key: artist name mapped file
+        name = json.load(f)
     name_info = {int(k): v for k, v in name.items()}
 
     with torch.no_grad():
@@ -220,8 +229,8 @@ def main():
 
     network.to(device)
     network = nn.DataParallel(network, device_ids=[0])
-    content_tf = train_transform()
-    style_tf = train_transform()
+    content_tf = train_transform(args.image_size)
+    style_tf = train_transform(args.image_size)
 
     content_dataset = FlatFolderDataset(args.content_dir, content_tf)
     text_path = os.path.join(args.style_dir,'artist_class.txt')
@@ -260,9 +269,11 @@ def main():
 
         out, out2, loss_c, loss_s, l_identity1, l_identity2, alignment_loss = network(content_images, style_images, style_labels)
         
-        loss_c = args.content_weight * loss_c
-        loss_s = args.style_weight * loss_s
-        loss = loss_c + loss_s + (l_identity1 * 70) + (l_identity2 * 1) + (alignment_loss * 10)
+        loss = args.content_weight * loss_c \
+            + args.style_weight * loss_s \
+            + (70 * l_identity1) \
+            + (1 * l_identity2) \
+            + (10 * alignment_loss)
 
         if i % 100 == 0:
             tqdm.write(f'Epoch: {i}, Total_loss: {loss.sum().item():.4f}, Content_loss: {loss_c.sum().item():.4f}, Style_loss: {loss_s.sum().item():.4f}, Identity_L1: {l_identity1.sum().item():.4f}, Identity_L2: {l_identity2.sum().item():.4f}, alignment_loss: {alignment_loss.sum().item():.4f}')
