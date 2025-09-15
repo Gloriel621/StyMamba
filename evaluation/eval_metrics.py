@@ -91,7 +91,7 @@ def _all_imgs(root):
 
 def compute_mean_ssim(path_to_stylized, path_to_content, gray=False, device="cpu"):
     stylized_paths = _all_imgs(path_to_stylized)
-    content_paths  = _all_imgs(path_to_content)
+    content_paths = create_paired_content_paths(stylized_paths, path_to_content)
     assert len(stylized_paths) == len(content_paths), \
         "Mismatch between content and stylized image counts."
 
@@ -311,7 +311,7 @@ def compute_content_distance(path_to_stylized, path_to_content, batch_size, cont
 
     # Sort paths in order to match up the stylized images with the corresponding content image
     stylized_image_paths = get_image_paths(path_to_stylized, sort=True)
-    content_image_paths = get_image_paths(path_to_content, sort=True)
+    content_image_paths = create_paired_content_paths(stylized_image_paths, path_to_content)
 
     assert len(stylized_image_paths) == len(content_image_paths), \
            'Number of stylized images and number of content images must be equal.'
@@ -380,7 +380,7 @@ def compute_patch_simi(path_to_stylized, path_to_content, batch_size, device, nu
 
     # Sort paths in order to match up the stylized images with the corresponding content image
     stylized_image_paths = get_image_paths(path_to_stylized, sort=True)
-    content_image_paths = get_image_paths(path_to_content, sort=True)
+    content_image_paths = create_paired_content_paths(stylized_image_paths, path_to_content)
 
     assert len(stylized_image_paths) == len(content_image_paths), \
            'Number of stylized images and number of content images must be equal.'
@@ -470,6 +470,35 @@ def compute_cfsd(path_to_stylized, path_to_content, batch_size, device, num_work
     simi_val = compute_patch_simi(path_to_stylized, path_to_content, 1, device, num_workers)
     simi_dist = f'{simi_val.item():.4f}'
     return simi_dist
+
+def create_paired_content_paths(stylized_paths, content_dir):
+    """
+    Creates a list of content image paths that are correctly paired with the stylized images.
+    It robustly finds the content stem by checking if the stylized filename
+    starts with one of the known content filenames.
+    """
+    # Create a lookup map from content filename (without extension) to its full path
+    content_map = {p.stem: str(p) for p in Path(content_dir).rglob('*')}
+    content_stems = list(content_map.keys())
+    
+    paired_content_paths = []
+    for stylized_path in stylized_paths:
+        stylized_stem = Path(stylized_path).stem
+        found_match = False
+        
+        # Check which of the known content stems is a prefix of the stylized file
+        for content_stem in content_stems:
+            # Check for "content-stem_" to avoid partial matches (e.g., 'art' matching 'artichoke')
+            if stylized_stem.startswith(content_stem + '_'):
+                paired_content_paths.append(content_map[content_stem])
+                found_match = True
+                break # Move to the next stylized image
+        
+        if not found_match:
+            raise ValueError(f"Could not find a matching content prefix for '{stylized_path}'. "
+                             f"Please ensure stylized files are named '{{content_name}}_{{style_name}}.ext'")
+                             
+    return paired_content_paths
 
 def main():
     parser = argparse.ArgumentParser()
