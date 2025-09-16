@@ -86,10 +86,16 @@ We provide two inference files, inference_image.py and inference_text.py
 
 We also provide test images for style and content in /examples.
 
+## Benchmark Images
+
+Benchmark result images by Mamba-ST, SaMam, and our StyMamba are provided at:
+[https://drive.google.com/drive/folders/1eJUD3QtDhR9rhAG3fZ5GzY6rwUlc7kIj?usp=sharing](https://drive.google.com/drive/folders/1eJUD3QtDhR9rhAG3fZ5GzY6rwUlc7kIj?usp=sharing)
+
 ## Checkpoints
 
-Our model checkpoint is provided at:
-[https://drive.google.com/file/d/1DUANFPGwNT2dh9RyL_RfxLJ8C_XANrYk/view?usp=sharing](https://drive.google.com/file/d/1DUANFPGwNT2dh9RyL_RfxLJ8C_XANrYk/view?usp=sharing)
+Our model checkpoints are provided at:
+
+[https://drive.google.com/drive/folders/1bMPb0Q0QkTQMd1di_e6msKOujsBVhI5A?usp=sharing](https://drive.google.com/drive/folders/1bMPb0Q0QkTQMd1di_e6msKOujsBVhI5A?usp=sharing)
 
 ## Acknowledgements
 
