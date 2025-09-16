@@ -38,18 +38,7 @@ class ImagePathDataset(torch.utils.data.Dataset):
 
 
 def get_activations(files, model, batch_size=50, device='cpu', num_workers=1):
-    """Computes the activations of for all images.
 
-    Args:
-        files (list): List of image file paths.
-        model (torch.nn.Module): Model for computing activations.
-        batch_size (int): Batch size for computing activations.
-        device (torch.device): Device for commputing activations.
-        num_workers (int): Number of threads for data loading.
-
-    Returns:
-        (): Activations of the images, shape [num_images, 2048].
-    """
     model.eval()
 
     if batch_size > len(files):
@@ -119,18 +108,6 @@ def compute_mean_ssim(path_to_stylized, path_to_content, gray=False, device="cpu
     return float(np.mean(scores))
 
 def compute_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
-    """Numpy implementation of the Frechet Distance.
-    
-    Args:
-        mu1 (np.ndarray): Sample mean of activations of stylized images.
-        mu2 (np.ndarray): Sample mean of activations of style images.
-        sigma1 (np.ndarray): Covariance matrix of activations of stylized images.
-        sigma2 (np.ndarray): Covariance matrix of activations of style images.
-        eps (float): Epsilon for numerical stability.
-
-    Returns:
-        (float) FID value.
-    """
 
     mu1 = np.atleast_1d(mu1)
     mu2 = np.atleast_1d(mu2)
@@ -167,19 +144,7 @@ def compute_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
 
 
 def compute_activation_statistics(files, model, batch_size=50, device='cpu', num_workers=1):
-    """Computes the activation statistics used by the FID.
-    
-    Args:
-        files (list): List of image file paths.
-        model (torch.nn.Module): Model for computing activations.
-        batch_size (int): Batch size for computing activations.
-        device (torch.device): Device for commputing activations.
-        num_workers (int): Number of threads for data loading.
 
-    Returns:
-        (np.ndarray, np.ndarray): mean of activations, covariance of activations
-        
-    """
     act = get_activations(files, model, batch_size, device, num_workers)
     mu = np.mean(act, axis=0)
     sigma = np.cov(act, rowvar=False)
@@ -187,16 +152,7 @@ def compute_activation_statistics(files, model, batch_size=50, device='cpu', num
 
 
 def get_image_paths(path, sort=False):
-    """Returns the paths of the images in the specified directory, filtered by allowed file extensions.
 
-    Args:
-        path (str): Path to image directory.
-        sort (bool): Sort paths alphanumerically.
-
-    Returns:
-        (list): List of image paths with allowed file extensions.
-
-    """
     paths = []
     for extension in ALLOWED_IMAGE_EXTENSIONS:
         paths.extend(glob.glob(os.path.join(path, f'*.{extension}')))
@@ -205,18 +161,7 @@ def get_image_paths(path, sort=False):
     return paths
 
 def compute_fid(path_to_stylized, path_to_style, batch_size, device, num_workers=1):
-    """Computes the FID for the given paths.
 
-    Args:
-        path_to_stylized (str): Path to the stylized images.
-        path_to_style (str): Path to the style images.
-        batch_size (int): Batch size for computing activations.
-        device (str): Device for commputing activations.
-        num_workers (int): Number of threads for data loading.
-
-    Returns:
-        (float) FID value.
-    """
     device = torch.device('cuda') if device == 'cuda' and torch.cuda.is_available() else torch.device('cpu')
 
     ckpt_file = utils.download(CKPT_URL)
@@ -237,19 +182,7 @@ def compute_fid(path_to_stylized, path_to_style, batch_size, device, num_workers
 
 
 def compute_fid_infinity(path_to_stylized, path_to_style, batch_size, device, num_points=15, num_workers=1):
-    """Computes the FID infinity for the given paths.
 
-    Args:
-        path_to_stylized (str): Path to the stylized images.
-        path_to_style (str): Path to the style images.
-        batch_size (int): Batch size for computing activations.
-        device (str): Device for commputing activations.
-        num_points (int): Number of FID_N we evaluate to fit a line.
-        num_workers (int): Number of threads for data loading.
-
-    Returns:
-        (float) FID infinity value.
-    """
     device = torch.device('cuda') if device == 'cuda' and torch.cuda.is_available() else torch.device('cpu')
 
     ckpt_file = utils.download(CKPT_URL)
@@ -294,19 +227,7 @@ def compute_fid_infinity(path_to_stylized, path_to_style, batch_size, device, nu
 
 
 def compute_content_distance(path_to_stylized, path_to_content, batch_size, content_metric='lpips', device='cuda', num_workers=1, gray=False):
-    """Computes the distance for the given paths.
 
-    Args:
-        path_to_stylized (str): Path to the stylized images.
-        path_to_style (str): Path to the style images.
-        batch_size (int): Batch size for computing activations.
-        content_metric (str): Metric to use for content distance. Choices: 'lpips', 'vgg', 'alexnet'
-        device (str): Device for commputing activations.
-        num_workers (int): Number of threads for data loading.
-
-    Returns:
-        (float) FID value.
-    """
     device = torch.device('cuda') if device == 'cuda' and torch.cuda.is_available() else torch.device('cpu')
 
     # Sort paths in order to match up the stylized images with the corresponding content image
@@ -363,19 +284,7 @@ def compute_content_distance(path_to_stylized, path_to_content, batch_size, cont
     return dist_sum / N
 
 def compute_patch_simi(path_to_stylized, path_to_content, batch_size, device, num_workers=1):
-    """Computes the distance for the given paths.
 
-    Args:
-        path_to_stylized (str): Path to the stylized images.
-        path_to_style (str): Path to the style images.
-        batch_size (int): Batch size for computing activations.
-        content_metric (str): Metric to use for content distance. Choices: 'lpips', 'vgg', 'alexnet'
-        device (str): Device for commputing activations.
-        num_workers (int): Number of threads for data loading.
-
-    Returns:
-        (float) FID value.
-    """
     device = torch.device('cuda') if device == 'cuda' and torch.cuda.is_available() else torch.device('cpu')
 
     # Sort paths in order to match up the stylized images with the corresponding content image
@@ -419,20 +328,7 @@ def compute_patch_simi(path_to_stylized, path_to_content, batch_size, device, nu
     return dist_sum / N
 
 def compute_art_fid(path_to_stylized, path_to_style, path_to_content, batch_size, device, mode='art_fid', content_metric='lpips', num_workers=1):
-    """Computes the FID for the given paths.
 
-    Args:
-        path_to_stylized (str): Path to the stylized images.
-        path_to_style (str): Path to the style images.
-        path_to_content (str): Path to the content images.
-        batch_size (int): Batch size for computing activations.
-        device (str): Device for commputing activations.
-        content_metric (str): Metric to use for content distance. Choices: 'lpips', 'vgg', 'alexnet'
-        num_workers (int): Number of threads for data loading.
-
-    Returns:
-        (float) ArtFID value.
-    """
     print('Compute FID value...')
     if mode == 'art_fid_inf':
         fid_value = compute_fid_infinity(path_to_stylized, path_to_style, batch_size, device, num_workers)
@@ -453,18 +349,7 @@ def compute_art_fid(path_to_stylized, path_to_style, path_to_content, batch_size
     return art_fid_value, fid_value, cnt_value
 
 def compute_cfsd(path_to_stylized, path_to_content, batch_size, device, num_workers=1):
-    """Computes CFSD for the given paths.
 
-    Args:
-        path_to_stylized (str): Path to the stylized images.
-        path_to_content (str): Path to the content images.
-        batch_size (int): Batch size for computing activations.
-        device (str): Device for commputing activations.
-        num_workers (int): Number of threads for data loading.
-
-    Returns:
-        (float) CFSD value.
-    """
     print('Compute CFSD value...')
 
     simi_val = compute_patch_simi(path_to_stylized, path_to_content, 1, device, num_workers)
@@ -472,34 +357,38 @@ def compute_cfsd(path_to_stylized, path_to_content, batch_size, device, num_work
     return simi_dist
 
 def create_paired_content_paths(stylized_paths, content_dir):
-    """
-    Creates a list of content image paths that are correctly paired with the stylized images.
-    It robustly finds the content stem by checking if the stylized filename
-    starts with one of the known content filenames.
-    """
-    # Create a lookup map from content filename (without extension) to its full path
+
     content_map = {p.stem: str(p) for p in Path(content_dir).rglob('*')}
     content_stems = list(content_map.keys())
+    
+    content_stems.sort(key=len, reverse=True)
     
     paired_content_paths = []
     for stylized_path in stylized_paths:
         stylized_stem = Path(stylized_path).stem
         found_match = False
         
-        # Check which of the known content stems is a prefix of the stylized file
         for content_stem in content_stems:
-            # Check for "content-stem_" to avoid partial matches (e.g., 'art' matching 'artichoke')
-            if stylized_stem.startswith(content_stem + '_'):
+            # Check for the new format: {content}_stylized_{style}
+            if stylized_stem.startswith(content_stem + '_stylized_'):
                 paired_content_paths.append(content_map[content_stem])
                 found_match = True
-                break # Move to the next stylized image
-        
-        if not found_match:
-            raise ValueError(f"Could not find a matching content prefix for '{stylized_path}'. "
-                             f"Please ensure stylized files are named '{{content_name}}_{{style_name}}.ext'")
-                             
-    return paired_content_paths
+                break
+            
+            # Check for the original format: {content}_{style}
+            elif stylized_stem.startswith(content_stem + '_'):
+                paired_content_paths.append(content_map[content_stem])
+                found_match = True
+                break
 
+        if not found_match:
+            raise ValueError(
+                f"Could not find a matching content file for '{stylized_path}'.\n"
+                f"1. Check if the corresponding content image exists in your content directory.\n"
+                f"2. Ensure stylized files are named like '{{content_name}}_stylized_{{style_name}}.ext' or '{{content_name}}_{{style_name}}.ext'."
+            )
+            
+    return paired_content_paths
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch_size', type=int, default=1, help='Batch size for computing activations.')
