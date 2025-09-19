@@ -78,35 +78,6 @@ def _all_imgs(root):
     exts = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
     return sorted([p for p in Path(root).rglob("*") if p.suffix.lower() in exts])
 
-def compute_mean_ssim(path_to_stylized, path_to_content, gray=False, device="cpu"):
-    stylized_paths = _all_imgs(path_to_stylized)
-    content_paths = create_paired_content_paths(stylized_paths, path_to_content)
-    assert len(stylized_paths) == len(content_paths), \
-        "Mismatch between content and stylized image counts."
-
-    # One metric object is enough; it can live on GPU
-    ssim_metric = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
-
-    scores = []
-    for p_st, p_ct in zip(stylized_paths, content_paths):
-        mode = "L" if gray else "RGB"
-
-        # ---- load -> tensor in [0,1] -----------------------------------------
-        im_st = TF.to_tensor(Image.open(p_st).convert(mode)).unsqueeze(0).to(device)
-        im_ct = TF.to_tensor(Image.open(p_ct).convert(mode)).unsqueeze(0).to(device)
-
-        # ---- adapt kernel size if images are small ---------------------------
-        h, w = im_st.shape[-2:]
-        win   = min(7, h, w)
-        if win % 2 == 0:
-            win -= 1
-        ssim_metric.kernel_size = win
-
-        score = ssim_metric(im_st, im_ct)
-        scores.append(score.item())
-
-    return float(np.mean(scores))
-
 def compute_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
 
     mu1 = np.atleast_1d(mu1)
@@ -294,7 +265,7 @@ def compute_patch_simi(path_to_stylized, path_to_content, batch_size, device, nu
     assert len(stylized_image_paths) == len(content_image_paths), \
            'Number of stylized images and number of content images must be equal.'
 
-    style_transforms = ToTensor()
+    style_transforms = Compose([Resize(512),ToTensor()])
     
     dataset_stylized = ImagePathDataset(stylized_image_paths, transforms=style_transforms)
     dataloader_stylized = torch.utils.data.DataLoader(dataset_stylized,
@@ -415,10 +386,8 @@ def main():
                         args.batch_size,
                         args.device,
                         args.num_workers)
-    
-    mean_ssim = compute_mean_ssim(args.tar, args.cnt)
 
-    print('FID:', fid, 'LPIPS:', lpips, 'ArtFID:', artfid, 'CFSD:', cfsd, 'SSIM:', mean_ssim)
+    print('FID:', fid, 'LPIPS:', lpips, 'ArtFID:', artfid, 'CFSD:', cfsd)
 
 if __name__ == '__main__':
     main()
