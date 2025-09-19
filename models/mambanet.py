@@ -1,39 +1,138 @@
-import copy
-from typing import Optional
-from VMamba2.classification.models.vmamba import VSSBlock, VSSBlockOneWay
-
 import torch
+from torch import Tensor
+import torch.nn as nn
 import torch.nn.functional as F
-from torch import nn, Tensor
-import numpy as np
+import math
+from typing import Optional
+import copy
+
+from timm.models.layers import DropPath
+from VMamba2.classification.models.vmamba import VSSBlock, VSSBlockOneWay, Mlp, mamba_init
+from VMamba2.classification.models.csm_triton import cross_scan_fn
+from VMamba2.classification.models.csms6s import selective_scan_fn
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-class MambaNet(nn.Module):
-
-    def __init__(self, d_model=512, nhead=8, num_encoder_layers=1,
-                 num_decoder_layers=1, dim_feedforward=2048, dropout=0.1,
-                 activation="relu", normalize_before=False,
-                 return_intermediate_dec=False):
+class CrossModalIntegrationLayer(nn.Module):
+    def __init__(
+        self,
+        hidden_dim: int = 512,
+        drop_path: float = 0.1,
+        norm_layer: nn.Module = nn.LayerNorm,
+        ssm_d_state: int = 64,
+        ssm_ratio: float = 2.0,
+        ssm_dt_rank: any = "auto",
+        ssm_conv: int = 3,
+        mlp_ratio: float = 4.0,
+        mlp_act_layer: nn.Module = nn.GELU,
+        mlp_drop_rate: float = 0.0,
+        **kwargs,
+    ):
         super().__init__()
+        self.d_inner = int(ssm_ratio * hidden_dim)
+        self.ssm_d_state = ssm_d_state
+        self.ssm_dt_rank = int(math.ceil(hidden_dim / 16)) if ssm_dt_rank == "auto" else ssm_dt_rank
+        self.k_group = 4
 
-        decoder_layer = VSSDecoderLayer(hidden_dim=d_model, dropout=dropout)
-        decoder_norm = nn.LayerNorm(d_model)
-        self.decoder = MambaDecoder(decoder_layer, num_decoder_layers, decoder_norm,
-                                    return_intermediate=return_intermediate_dec)
+        self.norm1 = norm_layer(hidden_dim)
+        self.in_proj = nn.Linear(hidden_dim, self.d_inner * 2, bias=False)
+        self.act = nn.SiLU()
+        self.conv2d = nn.Conv2d(
+            in_channels=self.d_inner, out_channels=self.d_inner,
+            groups=self.d_inner, bias=True, kernel_size=ssm_conv,
+            padding=(ssm_conv - 1) // 2,
+        )
+        
+        self.style_proj = nn.Linear(hidden_dim, self.k_group * (self.ssm_dt_rank + self.ssm_d_state), bias=False)
+        self.content_proj = nn.Linear(self.d_inner, self.k_group * self.ssm_d_state, bias=False)
+        
+        dt_projs = [mamba_init.dt_init(self.ssm_dt_rank, self.d_inner) for _ in range(self.k_group)]
+        self.dt_projs_weight = nn.Parameter(torch.stack([t.weight for t in dt_projs], dim=0))
+        self.dt_projs_bias = nn.Parameter(torch.stack([t.bias for t in dt_projs], dim=0))
+        del dt_projs
+        
+        self.A_logs = nn.Parameter(torch.zeros(self.k_group * self.d_inner, self.ssm_d_state))
+        self.Ds = nn.Parameter(torch.ones(self.k_group * self.d_inner))
+        
+        self.out_proj = nn.Linear(self.d_inner, hidden_dim, bias=False)
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
+        self.norm2 = norm_layer(hidden_dim)
+        self.mlp = Mlp(
+            in_features=hidden_dim,
+            hidden_features=int(hidden_dim * mlp_ratio),
+            act_layer=mlp_act_layer,
+            drop=mlp_drop_rate,
+        )
+
+    def forward(self, content: torch.Tensor, style: torch.Tensor):
+        B, H, W, C = content.shape
+        L = H * W
+        
+        residual_1 = content
+        
+        content_norm = self.norm1(content)
+        style_norm = self.norm1(style)
+
+        x_z = self.in_proj(content_norm)
+        x, z = x_z.chunk(2, dim=-1)
+        
+        x = x.permute(0, 3, 1, 2).contiguous()
+        x_conv = self.conv2d(x)
+        
+        style_params = self.style_proj(style_norm)
+        dts_style_rank, Bs_style = torch.split(style_params, [self.k_group * self.ssm_dt_rank, self.k_group * self.ssm_d_state], dim=-1)
+        
+        Cs_content = self.content_proj(self.act(x_conv).permute(0, 2, 3, 1).contiguous())
+        
+        xs = cross_scan_fn(self.act(x_conv), in_channel_first=True)
+        dts_rank = dts_style_rank.view(B, L, self.k_group, self.ssm_dt_rank).permute(0, 2, 3, 1)
+        dts = torch.einsum("b k r l, k d r -> b k d l", dts_rank, self.dt_projs_weight)
+        
+        xs = xs.flatten(1, 2)
+        dts = dts.flatten(1, 2)
+        
+        Bs = Bs_style.view(B, L, self.k_group, self.ssm_d_state).permute(0, 2, 3, 1).contiguous()
+        Cs = Cs_content.view(B, L, self.k_group, self.ssm_d_state).permute(0, 2, 3, 1).contiguous()
+        
+        As = -torch.exp(self.A_logs.float())
+        Ds = self.Ds.float()
+        delta_bias = self.dt_projs_bias.flatten()
+        
+        y_scan = selective_scan_fn(
+            xs, dts, As, Bs, Cs, Ds,
+            delta_bias=delta_bias,
+            delta_softplus=True,
+        )
+        
+        y_scan = y_scan.view(B, self.k_group, self.d_inner, H, W)
+
+        y = y_scan.sum(dim=1)
+        y = y.permute(0, 2, 3, 1).contiguous()
+        
+        y = y * z
+        y = self.out_proj(y)
+        
+        x = residual_1 + self.drop_path(y)
+        
+        residual_2 = x
+        x = self.norm2(x)
+        x = self.mlp(x)
+        final_output = residual_2 + self.drop_path(x)
+        
+        return final_output
+
+class MambaNet(nn.Module):
+    def __init__(self, d_model=512, num_decoder_layers=1, dropout=0.1, drop_path=0.1, **kwargs):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            CrossModalIntegrationLayer(hidden_dim=d_model, dropout=dropout, drop_path=drop_path, **kwargs)
+            for _ in range(num_decoder_layers)
+        ])
+        self.norm = nn.LayerNorm(d_model)
         self._reset_parameters()
 
-        self.d_model = d_model
-        self.nhead = nhead
-
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.norm3 = nn.LayerNorm(d_model)
-        self.dropout1 = nn.Dropout(dropout)
-        self.dropout2 = nn.Dropout(dropout)
-        self.dropout3 = nn.Dropout(dropout)
-
+        # Positional embedding components
         self.new_ps = nn.Conv2d(d_model, d_model, (1, 1))
         self.averagepooling = nn.AdaptiveAvgPool2d(18)
 
@@ -44,29 +143,23 @@ class MambaNet(nn.Module):
 
     def forward(self, style, mask, content, pos_embed_c, pos_embed_s):
 
-        # content-aware positional embedding
         content_pool = self.averagepooling(content)
         pos_c = self.new_ps(content_pool)
-        pos_embed_c = F.interpolate(pos_c, mode='bilinear', size=style.shape[-2:])
-
-        # Flatten NxCxHxW to HWxNxC and ensure 4D tensors
-        style = style.flatten(2).permute(2, 0, 1).unsqueeze(2)
-        if pos_embed_s is not None:
-            pos_embed_s = pos_embed_s.flatten(2).permute(2, 0, 1).unsqueeze(2)
-
-        content = content.flatten(2).permute(2, 0, 1).unsqueeze(2)
+        pos_embed_c = F.interpolate(pos_c, mode='bilinear', size=content.shape[-2:])
+        
+        content = content.permute(0, 2, 3, 1).contiguous()
+        style = style.permute(0, 2, 3, 1).contiguous()
+        
         if pos_embed_c is not None:
-            pos_embed_c = pos_embed_c.flatten(2).permute(2, 0, 1).unsqueeze(2)
+            pos_embed_c = pos_embed_c.permute(0, 2, 3, 1).contiguous()
+            content = content + pos_embed_c
 
-        hs = self.decoder(content, style)[0]
-
-        hs = hs.squeeze(2)
-
-        # HWxNxC to NxCxHxW
-        N, B, C = hs.shape
-        H = int(np.sqrt(N))
-        hs = hs.permute(1, 2, 0)
-        hs = hs.view(B, C, -1, H)
+        output = content
+        for layer in self.layers:
+            output = layer(output, style)
+        
+        output = self.norm(output)
+        hs = output.permute(0, 3, 1, 2).contiguous()
 
         return hs
 
@@ -86,9 +179,9 @@ class VSSOnewayLayer(nn.Module):
     def forward(self, src):
         return self.vss_block(src)
 
-class VSSDecoderLayer(nn.Module):
+class Mamba_TransFormer(nn.Module):
     def __init__(self, hidden_dim=256, dropout=0.1):
-        super(VSSDecoderLayer, self).__init__()
+        super(Mamba_TransFormer, self).__init__()
         self.hidden_dim = hidden_dim
         self.vss_block_content = VSSBlock(hidden_dim=hidden_dim, drop_path=dropout, ssm_d_state=64, ssm_act_layer=nn.GELU, ssm_init="v2", forward_type="m0_noz")
         # for style, use one way scan.
@@ -118,19 +211,14 @@ class VSSDecoderLayer(nn.Module):
         k = style
         v = style
 
-        # Self-attention using VSSBlock for content
         tgt2 = self.vss_block_content(q)
         tgt = content + self.dropout1(tgt2)
         tgt = self.norm1(tgt)
 
-        # Cross-attention using VSSBlock for style (handling values)
-        # Here, we treat the style sequence (k) as the input for cross-attention.
-        # We pass the style sequence through the VSSBlock, and then combine it with the original content sequence.
         tgt2_style = self.vss_block_style(k)
-        tgt2 = v + self.dropout2(tgt2_style)  # Integrate the value tensor here appropriately.
+        tgt2 = v + self.dropout2(tgt2_style)
         tgt = tgt + self.norm2(tgt2)
         
-        # Feedforward network
         tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
         tgt = tgt + self.dropout3(tgt2)
         tgt = self.norm3(tgt)
