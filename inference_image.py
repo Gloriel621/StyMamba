@@ -22,9 +22,9 @@ python image_only_inference.py \
        --out_dir      results
 """
 
-def test_transform():
+def test_transform(image_size):
     return transforms.Compose([
-        transforms.Resize((256, 256)),
+        transforms.Resize((image_size, image_size)),
         transforms.ToTensor()
     ])
 
@@ -44,11 +44,12 @@ def print_param_counts(m: torch.nn.Module, name: str):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--content_dir', default='./examples/images_content')
-    ap.add_argument('--style_dir',   default='./examples/images_style')
+    ap.add_argument('--content_dir', default='/home/gloriel621/StyMamba/examples/images_content')
+    ap.add_argument('--style_dir',   default='/home/gloriel621/StyMamba/examples/images_style')
     ap.add_argument('--ckpt',        required=True)
     ap.add_argument('--vgg',         default='./experiments/vgg_normalised.pth')
-    ap.add_argument('--out_dir',     default='./results')
+    ap.add_argument('--image_size', type=int, default=512, choices=[256, 512], help='Image size the model was trained on.')
+    ap.add_argument('--out_dir',     default='./results_256')
     ap.add_argument('--cfg',  default='./VMamba2/classification/configs/vssm/vmambav2v_small_224.yaml')
     ap.add_argument('--opts', nargs='*', default=[], help='override yaml options')
     args = ap.parse_args()
@@ -62,9 +63,20 @@ def main():
     vgg.load_state_dict(torch.load(args.vgg, map_location='cpu'))
     vgg = nn.Sequential(*list(vgg.children())[:44])
 
-    decoder   = StyMamba.decoder
-    embedding = StyMamba.PatchEmbed()
-    mamba_dec = mambanet.MambaNet()
+    hidden_dim = 512
+    if args.image_size == 512:
+        hidden_dim = 256
+
+    if hidden_dim == 256:
+        decoder = StyMamba.decoder256
+    elif hidden_dim == 512:
+        decoder = StyMamba.decoder512
+    else:
+        raise ValueError(f"No decoder available for hidden_dim: {hidden_dim}")
+
+
+    embedding = StyMamba.PatchEmbed(img_size=args.image_size, embed_dim=hidden_dim)
+    mamba_dec = mambanet.MambaNet(d_model=hidden_dim)
     name_info = {0: 'unused'}
 
     # build network
@@ -87,14 +99,14 @@ def main():
     print_param_counts(net.mambanet, "MambaNet")
     print_param_counts(net.decode, "Decoder")
     print_param_counts(net.embedding, "PatchEmbed")
-    print_param_counts(net.clip_model, "CLIP encoder")
+    print_param_counts(net.clip_model, "Mamba-CLIP encoder")
 
     torch.set_grad_enabled(False)
 
     # prepare data
-    ttfm       = test_transform()
+    ttfm = test_transform(args.image_size) # Update this line
     content_ds = ImgFolder(args.content_dir, ttfm)
-    style_ds   = ImgFolder(args.style_dir,   ttfm)
+    style_ds = ImgFolder(args.style_dir, ttfm)
 
     total_time = 0.0
     total_runs = 0
