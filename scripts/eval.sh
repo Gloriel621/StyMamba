@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=1 python3 evaluation/eval_metrics.py --sty ./examples/images_style --cnt ./examples/images_content --tar ./results_256
