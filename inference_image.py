@@ -11,11 +11,9 @@ import models.mambanet as mambanet
 import models.stymamba as StyMamba
 
 """
-image_only_inference.py  ──  Mamba style-transfer inference (image → image)
-
 Usage example
 -------------
-python image_only_inference.py \
+python image_inference.py \
        --content_dir  path/to/contents \
        --style_dir    path/to/styles   \
        --ckpt         experiments/model_iter_160000.pth \
@@ -47,9 +45,9 @@ def main():
     ap.add_argument('--content_dir', default='/home/gloriel621/StyMamba/examples/images_content')
     ap.add_argument('--style_dir',   default='/home/gloriel621/StyMamba/examples/images_style')
     ap.add_argument('--ckpt',        required=True)
-    ap.add_argument('--vgg',         default='./experiments/vgg_normalised.pth')
+    ap.add_argument('--vgg',         default='./vgg/vgg_normalised.pth')
     ap.add_argument('--image_size', type=int, default=512, choices=[256, 512], help='Image size the model was trained on.')
-    ap.add_argument('--out_dir',     default='./results_256')
+    ap.add_argument('--out_dir',     default='./results')
     ap.add_argument('--cfg',  default='./VMamba2/classification/configs/vssm/vmambav2v_small_224.yaml')
     ap.add_argument('--opts', nargs='*', default=[], help='override yaml options')
     args = ap.parse_args()
