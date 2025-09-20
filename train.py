@@ -156,9 +156,9 @@ def warmup_learning_rate(optimizer, iteration_count, args):
 def main():
     parser = argparse.ArgumentParser()
     # Basic options
-    parser.add_argument('--content_dir', default='/home/gloriel621/content_train', type=str,   
+    parser.add_argument('--content_dir', default='./path_to_your_content_dir', type=str,   
                         help='Directory path to a batch of content images')
-    parser.add_argument('--style_dir', default='/home/gloriel621/wikiart', type=str,  
+    parser.add_argument('--style_dir', default='./path_to_your_style_dir', type=str,  
                         help='Directory path to a batch of style images')
     parser.add_argument('--image_size', type=int, default=512, choices=[256, 512],
                         help='The size (height and width) of the images for training.')

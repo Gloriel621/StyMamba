@@ -42,8 +42,8 @@ def print_param_counts(m: torch.nn.Module, name: str):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--content_dir', default='/home/gloriel621/StyMamba/examples/images_content')
-    ap.add_argument('--style_dir',   default='/home/gloriel621/StyMamba/examples/images_style')
+    ap.add_argument('--content_dir', default='./examples/images_content')
+    ap.add_argument('--style_dir',   default='./examples/images_style')
     ap.add_argument('--ckpt',        required=True)
     ap.add_argument('--vgg',         default='./vgg/vgg_normalised.pth')
     ap.add_argument('--image_size', type=int, default=512, choices=[256, 512], help='Image size the model was trained on.')
