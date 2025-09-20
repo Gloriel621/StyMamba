@@ -164,7 +164,7 @@ def main():
                         help='The size (height and width) of the images for training.')
     
     # download the pretrained vgg checkpoint
-    parser.add_argument('--vgg', type=str, default='./experiments/vgg_normalised.pth')  
+    parser.add_argument('--vgg', type=str, default='./vgg/vgg_normalised.pth')  
 
     # training options
     parser.add_argument('--save_dir', default='./experiments',
