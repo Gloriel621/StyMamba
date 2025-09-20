@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=1 python3 inference_image.py --ckpt ./experiments/model_512_iter_200000.pth
