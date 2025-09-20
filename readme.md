@@ -3,7 +3,7 @@
 StyMamba is a Mamba‑based multimodal style‑transfer framework that supports both image‑guided and text‑guided stylization.
 
 
-**Warning:** The environment is extremely sensitive to exact package versions. 
+The environment is extremely sensitive to exact package versions. 
 
 Even with the instructions below the build may still fail on some machines. 
 
