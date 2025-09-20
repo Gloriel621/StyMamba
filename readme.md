@@ -56,6 +56,9 @@ cd VMamba2
 pip install -r requirements.txt
 cd kernels/selective_scan
 pip install .
+
+# 8. (Additional) for metric evaluation
+pip install torchmetrics lpips
 ```
 
 All versions should match those in the table above.
